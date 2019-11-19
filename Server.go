@@ -2,7 +2,7 @@ package LinkServer
 
 import (
 	"log"
-	"proto"
+	"gitlab.com/adoontheway/LinkProto"
 
 	"github.com/funny/link"
 	"github.com/funny/link/codec"
@@ -13,8 +13,7 @@ func Start()  {
 		json := codec.Json()
 		json.Register(proto.AddReq{})
 		json.Register(proto.AddRsp{})
-
-		server, err := link.Listen("tcp", "0.0.0.0:8888", json, 0 , link.HandlerFunc(serverSessionLoop))
+		server, err := link.Listen("tcp", "0.0.0.0:9001", json, 0, link.HandlerFunc(serverSessionLoop))
 		checkErr(err)
 		server.Serve()
 }
