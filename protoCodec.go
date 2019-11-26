@@ -1,11 +1,5 @@
 package LinkServer
 
-import (
-	"github.com/funny/link"
-	"io"
-	"reflect"
-)
-
 type Header struct {
 	Len      uint16
 	Crc      uint16 //hash/crc32
@@ -15,7 +9,7 @@ type Header struct {
 	SubId    uint8
 	EncType  uint8
 	Reserve  uint8
-	ReqId    uint32
+	ReqId    uint32//sequence id
 	RealSize uint16
 }
 

@@ -3,7 +3,7 @@ package LinkServer
 import "testing"
 
 func TestStart(t *testing.T) {
-	Start()
+	Start(8888)
 }
 
 func TestInitServerFromConfig(t *testing.T) {
