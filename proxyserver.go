@@ -2,11 +2,15 @@ package LinkServer
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"go.etcd.io/etcd/clientv3"
+	"log"
 	"net"
 	"os"
+	"time"
 )
 
 func init() {
@@ -18,6 +22,8 @@ var connMap map[*net.Conn]*UserConnection
 const (
 	HEADER_SIGN = 0x5F5F
 )
+
+var etcdClient *clientv3.Client
 
 type UserConnection struct {
 	UserId           int64
@@ -49,20 +55,37 @@ func (uc *UserConnection) Close() {
 	uc.Session = ""
 }
 
-func StartProxy() {
-	l, err := net.Listen("tcp", "0.0.0.0:8888")
+func StartProxy(port int32) {
+	log.SetFlags(log.Lshortfile | log.Ldate | log.Ltime)
+	f, err := os.Create(fmt.Sprintf("./logs/proxy-%d.log", port))
 	if err != nil {
-		fmt.Println("Error Listening:", err)
+		fmt.Println("Error when creating log file:", err)
 		os.Exit(1)
 	}
-	defer l.Close()
+
+	log.SetOutput(f)
+	l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", port))
+	if err != nil {
+		log.Println("Error Listening:", err)
+		os.Exit(1)
+	}
+	resolveLocalIp()
+	startEtcd()
+	getServers()
+	watchServers(l.Addr().String())
+
+	defer func() {
+		l.Close()
+		etcdClient.Close()
+	}()
+
 	for {
 		conn, err := l.Accept()
 		if err != nil {
-			fmt.Println("Error accepting:", err)
+			log.Println("Error accepting:", err)
 			os.Exit(1)
 		}
-		fmt.Printf("Receivied message %s -> %s \n", conn.RemoteAddr(), conn.LocalAddr())
+		log.Printf("Receivied message %s -> %s \n", conn.RemoteAddr(), conn.LocalAddr())
 		initSession(conn)
 		go handleRequest(conn)
 	}
@@ -81,7 +104,7 @@ func genSessionStr(len int) string {
 	key := make([]byte, len)
 	_, err := rand.Read(key)
 	if err != nil {
-		fmt.Printf("Generate session key error:%s", err)
+		log.Printf("Generate session key error:%s", err)
 		return ""
 	}
 	return fmt.Sprintf("%x", key)
@@ -95,12 +118,12 @@ func handleRequest(conn net.Conn) {
 	b := make([]byte, 1024)
 	n, err := conn.Read(b)
 	if err != nil {
-		fmt.Printf("remote client %s data read error %s", conn.RemoteAddr(), err)
+		log.Printf("remote client %s data read error %s", conn.RemoteAddr(), err)
 		return
 	}
 
 	if n == 0 || n < binary.Size(Header{}) {
-		fmt.Printf("invalid stream from client: %s,size:%d", conn.RemoteAddr(), n)
+		log.Printf("invalid stream from client: %s,size:%d", conn.RemoteAddr(), n)
 		return
 	}
 
@@ -109,11 +132,11 @@ func handleRequest(conn net.Conn) {
 	buf.ReadFrom(conn)
 	header.FromBuf(buf)
 	if header.Sign != HEADER_SIGN {
-		fmt.Printf("client:% invalid header sign:%d", conn.RemoteAddr(), header.Sign)
+		log.Printf("client:%s invalid header sign:%d", conn.RemoteAddr(), header.Sign)
 		return
 	}
 	if header.Ver != 1 {
-		fmt.Printf("client:% invalid header sign:%d", conn.RemoteAddr(), header.Sign)
+		fmt.Printf("client:%s invalid header sign:%d", conn.RemoteAddr(), header.Sign)
 		return
 	}
 	//todo check crc
@@ -131,18 +154,16 @@ func handleRequest(conn net.Conn) {
 	case MSG_CLIENT_TO_PROXY:
 		break
 	case MSG_CLIENT_TO_GAME:
-		interHeader := InternalPreHeader{}
-		data := bytes.Buffer{}
-		data.Write(interHeader.ToBuf().Bytes())
-		data.Write(buf.Bytes())
-		sendToGame(uc, data.Bytes())
-		break
 	case MSG_CLIENT_TO_HALL:
 		interHeader := InternalPreHeader{}
 		data := bytes.Buffer{}
 		data.Write(interHeader.ToBuf().Bytes())
 		data.Write(buf.Bytes())
-		sendToHall(uc, data.Bytes())
+		if header.MainId == MSG_CLIENT_TO_HALL {
+			sendToHall(uc, data.Bytes())
+		} else {
+			sendToGame(uc, data.Bytes())
+		}
 		break
 	}
 }
@@ -159,4 +180,68 @@ func sendToGame(conn *UserConnection, data []byte) {
 
 func handleGetAesKey() {
 
+}
+
+func startEtcd() {
+	var err error
+	etcdClient, err = clientv3.New(clientv3.Config{
+		Endpoints:   []string{"localhost:2379", "localhost:3379", "localhost:4379"},
+		DialTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		log.Fatalln("connect failed, err:", err)
+		return
+	}
+	log.Println("connect successed")
+}
+
+func getServers() {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+	resp, err := etcdClient.Get(ctx, "servers/proxyservers/")
+	cancel()
+	if err != nil {
+		log.Println("get failed, err:", err)
+		return
+	}
+	for _, ev := range resp.Kvs {
+		log.Printf("%s : %s \n", ev.Key, ev.Value)
+	}
+}
+
+func watchServers(addr string) {
+	etcdClient.Put(context.Background(), "servers/proxyservers/", addr)
+	for {
+		rch := etcdClient.Watch(context.Background(), "servers/proxyservers/")
+		for wresp := range rch {
+			for _, ev := range wresp.Events {
+				log.Printf("Event[type:%s key:%q value:%q] \n", ev.Type, ev.Kv.Key, ev.Kv.Value)
+			}
+		}
+	}
+}
+
+func resolveLocalIp() {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		log.Fatalln("Get net interface error:", err)
+		return
+	}
+	for _, i := range ifaces {
+		addrs, err := i.Addrs()
+		if err != nil {
+			log.Println("Loop net interface error:", err)
+			continue
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+
+			}
+			log.Println("Get local ip address:", ip.String())
+		}
+	}
 }
