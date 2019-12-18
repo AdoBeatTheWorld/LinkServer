@@ -1,4 +1,4 @@
-package LinkServer
+package linkserver
 
 import (
 	"bytes"

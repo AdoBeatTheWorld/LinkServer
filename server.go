@@ -1,4 +1,4 @@
-package LinkServer
+package linkserver
 
 import (
 	"encoding/json"
@@ -34,13 +34,13 @@ func InitServerFromConfig(configPath string) {
 	Start(config.Port)
 }
 
-func Start(port int32)  {
-		json := codec.Json()
-		json.Register(proto.AddReq{})
-		json.Register(proto.AddRsp{})
-		server, err := link.Listen("tcp", fmt.Sprintf(":%d",port), json, 0, link.HandlerFunc(serverSessionLoop))
-		checkErr(err)
-		server.Serve()
+func Start(port int32) {
+	json := codec.Json()
+	json.Register(proto.AddReq{})
+	json.Register(proto.AddRsp{})
+	server, err := link.Listen("tcp", fmt.Sprintf(":%d", port), json, 0, link.HandlerFunc(serverSessionLoop))
+	checkErr(err)
+	server.Serve()
 }
 
 func serverSessionLoop(session *link.Session) {

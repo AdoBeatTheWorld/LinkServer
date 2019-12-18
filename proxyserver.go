@@ -1,8 +1,7 @@
-package LinkServer
+package linkserver
 
 import (
 	"bytes"
-	"context"
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
@@ -17,7 +16,10 @@ func init() {
 	connMap = make(map[*net.Conn]*UserConnection)
 }
 
-var connMap map[*net.Conn]*UserConnection
+var (
+	connMap map[*net.Conn]*UserConnection
+	localIp string
+)
 
 const (
 	HEADER_SIGN = 0x5F5F
@@ -71,8 +73,8 @@ func StartProxy(port int32) {
 	}
 	resolveLocalIp()
 	startEtcd()
-	getServers()
-	watchServers(l.Addr().String())
+	//getServers()
+	//go watchServers(l.Addr().String())
 
 	defer func() {
 		l.Close()
@@ -195,6 +197,7 @@ func startEtcd() {
 	log.Println("connect successed")
 }
 
+/*
 func getServers() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 	resp, err := etcdClient.Get(ctx, "servers/proxyservers/")
@@ -211,7 +214,7 @@ func getServers() {
 func watchServers(addr string) {
 	etcdClient.Put(context.Background(), "servers/proxyservers/", addr)
 	for {
-		rch := etcdClient.Watch(context.Background(), "servers/proxyservers/")
+		rch := etcdClient.Watch(context.Background(), "servers/",clientv3.WithPrefix())
 		for wresp := range rch {
 			for _, ev := range wresp.Events {
 				log.Printf("Event[type:%s key:%q value:%q] \n", ev.Type, ev.Kv.Key, ev.Kv.Value)
@@ -219,29 +222,17 @@ func watchServers(addr string) {
 		}
 	}
 }
-
+*/
 func resolveLocalIp() {
-	ifaces, err := net.Interfaces()
+	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		log.Fatalln("Get net interface error:", err)
-		return
+		os.Stderr.WriteString("Oops:" + err.Error())
+		os.Exit(1)
 	}
-	for _, i := range ifaces {
-		addrs, err := i.Addrs()
-		if err != nil {
-			log.Println("Loop net interface error:", err)
-			continue
-		}
-		for _, addr := range addrs {
-			var ip net.IP
-			switch v := addr.(type) {
-			case *net.IPNet:
-				ip = v.IP
-			case *net.IPAddr:
-				ip = v.IP
-
-			}
-			log.Println("Get local ip address:", ip.String())
+	for _, a := range addrs {
+		if ipnet, ok := a.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
+			localIp = ipnet.IP.String()
+			log.Printf("Local IP : %s", localIp)
 		}
 	}
 }
