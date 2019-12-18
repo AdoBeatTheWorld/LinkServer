@@ -72,13 +72,18 @@ func StartProxy(port int32) {
 		os.Exit(1)
 	}
 	resolveLocalIp()
-	startEtcd()
+	//startEtcd()
 	//getServers()
 	//go watchServers(l.Addr().String())
+	if port == 8889 {
+		go startMaster(port)
+	} else {
+		go startService(port)
+	}
 
 	defer func() {
 		l.Close()
-		etcdClient.Close()
+		//etcdClient.Close()
 	}()
 
 	for {
@@ -91,6 +96,40 @@ func StartProxy(port int32) {
 		initSession(conn)
 		go handleRequest(conn)
 	}
+}
+
+func startMaster(port int32) {
+	m, err := NewMaster([]string{
+		"localhost:2379", "localhost:3379", "localhost:4379",
+	}, "services/")
+	if err != nil {
+		log.Fatal(err)
+	}
+	for {
+		for k, v := range m.Nodes {
+			fmt.Printf("node:%s, ip:%s\n", k, v.Info.IP)
+		}
+		fmt.Printf("nodes num = %d\n", len(m.Nodes))
+		time.Sleep(time.Second * 5)
+	}
+}
+
+func startService(port int32) {
+	serviceName := fmt.Sprintf("proxy:%d", port)
+	serviceInfo := ServiceInfo{IP: fmt.Sprintf("127.0.0.1:%d", port)}
+	s, err := NewService(
+		serviceName,
+		serviceInfo,
+		[]string{
+			"localhost:2379", "localhost:3379", "localhost:4379",
+		})
+	if err != nil {
+		log.Fatal(err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("name:%s, ip:%s\n", s.Name, s.Info.IP)
+	s.Start()
 }
 
 func initSession(conn net.Conn) {
