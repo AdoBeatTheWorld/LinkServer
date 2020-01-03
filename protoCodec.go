@@ -81,6 +81,20 @@ func (ih *InternalPreHeader) FromBuf(buf *bytes.Buffer) {
 	binary.Read(buf, binary.LittleEndian, ih.CheckSum)
 }
 
+func CheckSum(data []byte) uint16 {
+	var sum uint16
+	idx := 0
+	size := len(data)
+	for i := 0; i < size/2; i++ {
+		sum += binary.LittleEndian.Uint16(data[idx:])
+		idx += 2
+	}
+	if size%2 != 0 {
+		sum += uint16(data[idx])
+	}
+	return sum
+}
+
 /*
 type ProtoProtocol struct {
 	types map[string]reflect.Type
